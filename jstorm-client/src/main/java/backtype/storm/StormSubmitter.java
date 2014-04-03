@@ -7,12 +7,17 @@ import backtype.storm.utils.Utils;
 
 import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.thrift.TException;
 import org.json.simple.JSONValue;
+
+import com.alibaba.jstorm.client.ConfigExtension;
+import com.alibaba.jstorm.utils.JStormUtils;
 
 /**
  * Use this class to submit topologies to run on the Storm cluster. You should
@@ -92,6 +97,11 @@ public class StormSubmitter {
 					throw new RuntimeException("Topology with name `" + name
 							+ "` already exists on cluster");
 				}
+				if (checkResource(topology, conf, client)) {
+					throw new RuntimeException("Topology with name `" + name
+							+ "` submit abort because lacking resource, please reduce" 
+							+ "resource requirement and retry!");
+				}
 				submitJar(conf);
 				try {
 					LOG.info("Submitting topology " + name
@@ -141,6 +151,78 @@ public class StormSubmitter {
 		}
 	}
 
+	// check whether resources of the cluster to reach the requirements  
+	private static boolean checkResource(
+			StormTopology topology, Map conf, 
+			NimbusClient client) throws TException {
+		ClusterSummary clusterSummary = client.getClient().getClusterInfo();
+		List<SupervisorSummary> supervisors = clusterSummary.get_supervisors();
+		int nFreeWorkers = 0;
+		int nFreeCPU = 0;
+		int nFreeMem = 0;
+		int nFreeDisk = 0;
+		if (supervisors == null || supervisors.size() == 0) {
+			LOG.info("Cluster has no any alive supervisors!");
+			return false;
+		}
+		for (SupervisorSummary supervisor : supervisors) {
+			nFreeWorkers = nFreeWorkers 
+				+ supervisor.get_num_workers() 
+				- supervisor.get_num_used_workers();
+			nFreeCPU = nFreeCPU
+				+ supervisor.get_num_cpu()
+				- supervisor.get_num_used_cpu();
+			nFreeMem = nFreeMem
+				+ supervisor.get_num_mem()
+				- supervisor.get_num_used_mem();
+			nFreeDisk = nFreeDisk
+				+ supervisor.get_num_disk()
+				- supervisor.get_num_used_disk();
+		}
+		int numTasks = 0;
+		Map<String, SpoutSpec> spoutSpecs = topology.get_spouts();
+		Map<String, Bolt> bolts = topology.get_bolts();
+		Iterator iter = spoutSpecs.entrySet().iterator(); 
+		while (iter.hasNext()) {
+		    Map.Entry entry = (Map.Entry) iter.next();
+		    SpoutSpec val = (SpoutSpec) entry.getValue();
+		    int parallelhint = val.get_common().is_set_parallelism_hint() ? 
+		    		val.get_common().get_parallelism_hint() : 1;
+			Map<Object, Object> serializedConf = (Map<Object, Object>) JStormUtils.from_json(
+					val.get_common().get_json_conf());
+		    int tasks = 0;
+		    Integer nt = (Integer) serializedConf.get(Config.TOPOLOGY_TASKS);
+		    if (nt == null) {
+		    	tasks = parallelhint;
+		    } else if (nt.intValue() > parallelhint) {
+		    	tasks = nt.intValue();
+		    } else {
+		    	tasks = parallelhint;
+		    }
+		    if (tasks <= 0) {
+		    	tasks = 1;
+		    }
+		    numTasks = numTasks + tasks;
+		} 
+		int nNeedWorkers = (Integer) conf.get(Config.TOPOLOGY_WORKERS);
+		int nNeedCPU = numTasks * ConfigExtension.getCpuSlotsPerTask(conf);
+		int nNeedMem = numTasks * ConfigExtension.getMemSlotPerTask(conf);
+		
+		if (nFreeWorkers < nNeedWorkers) {
+			LOG.info("Topology Submit Abort : No enough Net resource!");
+			return false;
+		}
+		if (nFreeCPU < nNeedCPU) {
+			LOG.info("Topology Submit Abort : No enough CPU resource!");
+			return false;
+		}
+		if (nFreeMem < nNeedMem) {
+			LOG.info("Topology Submit Abort : No enough Mem resource!");
+			return false;
+		}
+		return true;
+	}
+	
 	private static String submittedJar = null;
 
 	private static void submitJar(Map conf) {
