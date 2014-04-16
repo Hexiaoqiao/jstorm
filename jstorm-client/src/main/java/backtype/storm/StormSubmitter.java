@@ -208,12 +208,12 @@ public class StormSubmitter {
 		} 
 		// calc bolt tasks num
 		while (biter.hasNext()) {
-			Map.Entry entry = (Map.Entry) biter.next();
-			Bolt val = (Bolt) entry.getValue();
-			int parallelhint = val.get_common().is_set_parallelism_hint() ? 
-		    		val.get_common().get_parallelism_hint() : 1;
-			Map<Object, Object> serializedConf = (Map<Object, Object>) JStormUtils.from_json(
-					val.get_common().get_json_conf());
+		    Map.Entry entry = (Map.Entry) biter.next();
+		    Bolt val = (Bolt) entry.getValue();
+		    int parallelhint = val.get_common().is_set_parallelism_hint() ? 
+		    	val.get_common().get_parallelism_hint() : 1;
+		    Map<Object, Object> serializedConf = (Map<Object, Object>) JStormUtils.from_json(
+			val.get_common().get_json_conf());
 		    int tasks = 0;
 		    Integer nt = (Integer) serializedConf.get(Config.TOPOLOGY_TASKS);
 		    if (nt == null) {
