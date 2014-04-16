@@ -97,7 +97,7 @@ public class StormSubmitter {
 					throw new RuntimeException("Topology with name `" + name
 							+ "` already exists on cluster");
 				}
-				if (checkResource(topology, conf, client)) {
+				if (!checkResource(topology, conf, client)) {
 					throw new RuntimeException("Topology with name `" + name
 							+ "` submit abort because lacking resource, please reduce" 
 							+ "resource requirement and retry!");
@@ -183,6 +183,8 @@ public class StormSubmitter {
 		Map<String, SpoutSpec> spoutSpecs = topology.get_spouts();
 		Map<String, Bolt> bolts = topology.get_bolts();
 		Iterator iter = spoutSpecs.entrySet().iterator(); 
+		Iterator biter = bolts.entrySet().iterator();
+		// calc spout tasks num
 		while (iter.hasNext()) {
 		    Map.Entry entry = (Map.Entry) iter.next();
 		    SpoutSpec val = (SpoutSpec) entry.getValue();
@@ -204,6 +206,28 @@ public class StormSubmitter {
 		    }
 		    numTasks = numTasks + tasks;
 		} 
+		// calc bolt tasks num
+		while (biter.hasNext()) {
+			Map.Entry entry = (Map.Entry) biter.next();
+			Bolt val = (Bolt) entry.getValue();
+			int parallelhint = val.get_common().is_set_parallelism_hint() ? 
+		    		val.get_common().get_parallelism_hint() : 1;
+			Map<Object, Object> serializedConf = (Map<Object, Object>) JStormUtils.from_json(
+					val.get_common().get_json_conf());
+		    int tasks = 0;
+		    Integer nt = (Integer) serializedConf.get(Config.TOPOLOGY_TASKS);
+		    if (nt == null) {
+		    	tasks = parallelhint;
+		    } else if (nt.intValue() > parallelhint) {
+		    	tasks = nt.intValue();
+		    } else {
+		    	tasks = parallelhint;
+		    }
+		    if (tasks <= 0) {
+		    	tasks = 1;
+		    }
+		    numTasks = numTasks + tasks;
+		}
 		int nNeedWorkers = (Integer) conf.get(Config.TOPOLOGY_WORKERS);
 		int nNeedCPU = numTasks * ConfigExtension.getCpuSlotsPerTask(conf);
 		int nNeedMem = numTasks * ConfigExtension.getMemSlotPerTask(conf);
