@@ -1,26 +1,46 @@
+/**
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.alipay.dw.jstorm.example.drpc;
 
-import backtype.storm.Config;
-import backtype.storm.StormSubmitter;
-import backtype.storm.coordination.BatchOutputCollector;
-import backtype.storm.coordination.CoordinatedBolt.FinishedCallback;
-import backtype.storm.drpc.LinearDRPCTopologyBuilder;
-import backtype.storm.task.OutputCollector;
-import backtype.storm.task.TopologyContext;
-import backtype.storm.topology.BasicOutputCollector;
-import backtype.storm.topology.IRichBolt;
-import backtype.storm.topology.OutputFieldsDeclarer;
-import backtype.storm.topology.base.BaseBasicBolt;
-import backtype.storm.topology.base.BaseBatchBolt;
-import backtype.storm.tuple.Fields;
-import backtype.storm.tuple.Tuple;
-import backtype.storm.tuple.Values;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import com.alibaba.jstorm.utils.JStormUtils;
+import com.alibaba.jstorm.utils.LoadConf;
+
+import backtype.storm.Config;
+import backtype.storm.LocalCluster;
+import backtype.storm.LocalDRPC;
+import backtype.storm.StormSubmitter;
+import backtype.storm.coordination.BatchOutputCollector;
+import backtype.storm.drpc.LinearDRPCTopologyBuilder;
+import backtype.storm.task.TopologyContext;
+import backtype.storm.topology.BasicOutputCollector;
+import backtype.storm.topology.OutputFieldsDeclarer;
+import backtype.storm.topology.base.BaseBasicBolt;
+import backtype.storm.topology.base.BaseBatchBolt;
+import backtype.storm.tuple.Fields;
+import backtype.storm.tuple.Tuple;
+import backtype.storm.tuple.Values;
 
 /**
  * This is a good example of doing complex Distributed RPC on top of Storm. This 
@@ -41,6 +61,9 @@ import java.util.Set;
  * See https://github.com/nathanmarz/storm/wiki/Distributed-RPC for more information on Distributed RPC.
  */
 public class ReachTopology {
+	
+	public final static String TOPOLOGY_NAME = "reach";
+	
     public static Map<String, List<String>> TWEETERS_DB = new HashMap<String, List<String>>() {{
        put("foo.com/blog/1", Arrays.asList("sally", "bob", "tim", "george", "nathan")); 
        put("engineering.twitter.com/blog/5", Arrays.asList("adam", "david", "sally", "nathan")); 
@@ -150,7 +173,7 @@ public class ReachTopology {
     }
     
     public static LinearDRPCTopologyBuilder construct() {
-        LinearDRPCTopologyBuilder builder = new LinearDRPCTopologyBuilder("reach");
+        LinearDRPCTopologyBuilder builder = new LinearDRPCTopologyBuilder(TOPOLOGY_NAME);
         builder.addBolt(new GetTweeters(), 1);
         builder.addBolt(new GetFollowers(), 1)
                  .shuffleGrouping();
@@ -161,27 +184,45 @@ public class ReachTopology {
         return builder;
     }
     
+
+	
+    
     public static void main(String[] args) throws Exception {
+    	
         LinearDRPCTopologyBuilder builder = construct();
-        
-        
+  
         Config conf = new Config();
         conf.setNumWorkers(6);
-        StormSubmitter.submitTopology(args[0], conf, builder.createRemoteTopology());
+        if (args.length != 0) {
+        	
+        	try {
+	        	Map yamlConf = LoadConf.LoadYaml(args[0]);
+	        	if (yamlConf != null) {
+	        		conf.putAll(yamlConf);
+	        	}
+        	}catch (Exception e) {
+        		System.out.println("Input " + args[0] + " isn't one yaml ");
+        	}
+        	
+        	
+        	StormSubmitter.submitTopology(TOPOLOGY_NAME, conf, builder.createRemoteTopology());
+        }else {
         
         
-//            conf.setMaxTaskParallelism(3);
-//            LocalDRPC drpc = new LocalDRPC();
-//            LocalCluster cluster = new LocalCluster();
-//            cluster.submitTopology("reach-drpc", conf, builder.createLocalTopology(drpc));
-//            
-//            String[] urlsToTry = new String[] { "foo.com/blog/1", "engineering.twitter.com/blog/5", "notaurl.com"};
-//            for(String url: urlsToTry) {
-//                System.out.println("Reach of " + url + ": " + drpc.execute("reach", url));
-//            }
-//            
-//            cluster.shutdown();
-//            drpc.shutdown();
-
+            conf.setMaxTaskParallelism(3);
+            LocalDRPC drpc = new LocalDRPC();
+            LocalCluster cluster = new LocalCluster();
+            cluster.submitTopology(TOPOLOGY_NAME, conf, builder.createLocalTopology(drpc));
+            
+            JStormUtils.sleepMs(50000);
+            
+            String[] urlsToTry = new String[] { "foo.com/blog/1", "engineering.twitter.com/blog/5", "notaurl.com"};
+            for(String url: urlsToTry) {
+                System.out.println("Reach of " + url + ": " + drpc.execute(TOPOLOGY_NAME, url));
+            }
+            
+            cluster.shutdown();
+            drpc.shutdown();
+        }
     }
 }
